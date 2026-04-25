@@ -108,14 +108,10 @@ what are key highlights from my resume?
 
 ## Demo GIFs
 
-Add GIFs to `docs/images/` and reference them here:
-
-```md
 ![TUI Quick Tour](docs/images/tui-quick-tour.gif)
 ![PDF Ingest Demo](docs/images/pdf-ingest-demo.gif)
 ![Web Connect Demo](docs/images/web-connect-demo.gif)
 ![Troubleshooting Demo](docs/images/troubleshooting-demo.gif)
-```
 
 Suggested captures:
 - Open TUI, run `/help`, `/status`, `/sources`

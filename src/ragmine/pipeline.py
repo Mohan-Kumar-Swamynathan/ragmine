@@ -42,6 +42,20 @@ def _truncate_context(context: str, question: str) -> str:
     return context[: allowed * 4]
 
 
+def _fallback_answer(results: list[SearchResult], error: Exception) -> str:
+    """Return an extractive fallback when LLM generation is unavailable."""
+    if not results:
+        return f"Generation unavailable ({error}). No relevant context found."
+
+    top = results[0].chunk.text.strip()
+    snippet = top[:700] + ("..." if len(top) > 700 else "")
+    return (
+        "LLM generation is currently unavailable, so here is the most relevant context I found:\n\n"
+        f"{snippet}\n\n"
+        f"[generation error: {error}]"
+    )
+
+
 RAG_PROMPT = """Use the following context to answer the question.
 If the context doesn't contain the answer, say "I don't have enough information."
 
@@ -90,7 +104,7 @@ class Ragmine:
 
     def ingest(self, path: str, recursive: bool = True, glob: str = "*") -> int:
         """Ingest a file or directory. Returns number of chunks created."""
-        p = Path(path)
+        p = self._resolve_ingest_path(path)
         total = 0
 
         if p.is_file():
@@ -103,8 +117,29 @@ class Ragmine:
                         total += self._ingest_file(f)
         else:
             console.print(f"[red]Path not found: {path}[/red]")
+            console.print("[dim]Tip: Use an absolute path or place the file in current directory.[/dim]")
 
         return total
+
+    def _resolve_ingest_path(self, path: str) -> Path:
+        """Resolve ingest path with user-friendly fallbacks for common folders."""
+        raw = Path(path).expanduser()
+        if raw.exists():
+            return raw
+
+        # If it's not an absolute path, try a few common user locations.
+        if not raw.is_absolute():
+            candidates = [
+                Path.cwd() / raw,
+                Path.home() / "Downloads" / raw.name,
+                Path.home() / "Documents" / raw.name,
+                Path.home() / "Desktop" / raw.name,
+            ]
+            for candidate in candidates:
+                if candidate.exists():
+                    return candidate
+
+        return raw
 
     def ingest_chunks(self, chunks: list[Chunk], source: str) -> int:
         """Ingest chunks directly (from connector or other source)."""
@@ -131,6 +166,14 @@ class Ragmine:
 
         count = self.store.update_chunks(chunks)
         return count
+
+    def clear_all(self) -> tuple[int, int]:
+        """Delete all ingested sources/chunks. Returns (sources_deleted, chunks_deleted)."""
+        sources = self.store.list_sources(limit=100000)
+        chunks_deleted = 0
+        for source in sources:
+            chunks_deleted += self.store.delete_by_source(source)
+        return len(sources), chunks_deleted
 
     def _ingest_file(self, file_path: Path) -> int:
         """Parse → chunk → embed → store a single file."""
@@ -201,7 +244,10 @@ class Ragmine:
         prompt = RAG_PROMPT.format(context=context, question=question)
 
         # Generate
-        answer = self.llm.generate(prompt, system=RAG_SYSTEM)
+        try:
+            answer = self.llm.generate(prompt, system=RAG_SYSTEM)
+        except Exception as e:
+            answer = _fallback_answer(results, e)
 
         return RAGResponse(
             answer=answer,
@@ -247,7 +293,10 @@ class Ragmine:
         context = _truncate_context(context, question)
         prompt = RAG_PROMPT.format(context=context, question=question)
 
-        answer = await self.llm.agenerate(prompt, system=RAG_SYSTEM)
+        try:
+            answer = await self.llm.agenerate(prompt, system=RAG_SYSTEM)
+        except Exception as e:
+            answer = _fallback_answer(results, e)
 
         return RAGResponse(
             answer=answer,

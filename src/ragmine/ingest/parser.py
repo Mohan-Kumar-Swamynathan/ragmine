@@ -62,6 +62,10 @@ class SmartParser:
             return self._parse_with_docling(path)
         except ImportError:
             pass
+        except Exception:
+            # Docling can fail at runtime in some environments (e.g., subprocess issues).
+            # Fall back to lightweight parsers instead of breaking ingest.
+            pass
 
         # Fallback per type
         ext = path.suffix.lower()
@@ -89,9 +93,11 @@ class SmartParser:
         )
 
     def _parse_pdf_fallback(self, path: Path) -> ParsedDocument:
+        pages: list[str] = []
+        parser_used = "none"
         try:
             import pdfplumber
-            pages = []
+            parser_used = "pdfplumber"
             with pdfplumber.open(path) as pdf:
                 for page in pdf.pages:
                     t = page.extract_text()
@@ -99,11 +105,31 @@ class SmartParser:
                         pages.append(t)
             text = "\n\n".join(pages)
         except ImportError:
-            text = f"[Install pdfplumber or docling to parse PDFs: {path.name}]"
+            text = ""
+        except Exception:
+            text = ""
+
+        # Secondary fallback: pypdf (pure-python, lightweight)
+        if not text.strip():
+            try:
+                from pypdf import PdfReader
+
+                parser_used = "pypdf"
+                reader = PdfReader(str(path))
+                pages = [(p.extract_text() or "").strip() for p in reader.pages]
+                pages = [p for p in pages if p]
+                text = "\n\n".join(pages)
+            except ImportError:
+                pass
+            except Exception:
+                pass
+
+        if not text.strip():
+            text = f"[Could not parse PDF text automatically: {path.name}. Install pdfplumber or pypdf.]"
 
         return ParsedDocument(
             text=text, source=str(path), source_type="document",
-            metadata={"filename": path.name, "parser": "pdfplumber"}, pages=pages if "pages" in dir() else None,
+            metadata={"filename": path.name, "parser": parser_used}, pages=pages or None,
         )
 
     def _parse_docx_fallback(self, path: Path) -> ParsedDocument:

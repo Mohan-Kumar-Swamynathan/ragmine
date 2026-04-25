@@ -42,6 +42,8 @@ class Settings(BaseSettings):
     llm_provider: Literal["ollama", "openai-compatible"] = "ollama"
     ollama_base_url: str = "http://localhost:11434"
     ollama_model: str = "qwen3:8b"
+    llm_max_tokens: int = 512
+    llm_temperature: float = 0.2
     openai_base_url: str = ""
     openai_api_key: str = ""
     openai_model: str = ""

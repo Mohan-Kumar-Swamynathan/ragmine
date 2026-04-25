@@ -17,7 +17,7 @@ from textual.widgets import Footer, Header, Input, Label
 
 
 SUGGESTIONS = [
-    "/help", "/ingest", "/connect", "/sources", "/status", "/clear", "/delete", "/export",
+    "/help", "/ingest", "/connect", "/sources", "/status", "/clear", "/clear-all", "/delete", "/export",
     "/connect web --url=", "/connect github --repo=", "/connect rss --feed=",
     "/ingest ./", "/connect confluence --space=", "/connect slack --channel=",
 ]
@@ -85,6 +85,7 @@ class RagmineTUI(App):
         Binding("ctrl+l", "clear_screen", "Clear", show=False),
         Binding("ctrl+k", "scroll_up", "Scroll Up", show=False),
         Binding("ctrl+j", "scroll_down", "Scroll Down", show=False),
+        Binding("ctrl+a", "select_all", "Select All", show=False),
     ]
 
     def __init__(self, **overrides):
@@ -114,7 +115,7 @@ class RagmineTUI(App):
         with Container(id="chat-container"):
             with VerticalScroll(id="messages"):
                 yield Label("[bold magenta]⛏️  ragmine[/bold magenta]", markup=True)
-                yield Label("[dim]Commands: /help, /ingest, /connect, /sources, /status, /clear, /delete[/dim]", markup=True)
+                yield Label("[dim]Commands: /help, /ingest, /connect, /sources, /status, /clear, /clear-all, /delete[/dim]", markup=True)
                 yield Label("[dim]Tip: Press up/down for history | Ctrl+K/J scroll | Esc quit[/dim]", markup=True)
                 yield Label("", markup=True)
             with Container(id="input-area"):
@@ -166,6 +167,33 @@ class RagmineTUI(App):
     def action_scroll_down(self) -> None:
         messages = self.query_one("#messages", VerticalScroll)
         messages.scroll_down()
+
+    def action_select_all(self) -> None:
+        messages = self.query_one("#messages", VerticalScroll)
+        lines = []
+        for label in messages.query("Label"):
+            if label.renderable:
+                lines.append(str(label.renderable))
+        text = "\n".join(lines)
+        self.copy_to_clipboard(text)
+        self._add_message("bot", "[dim]Chat copied to clipboard! Use Ctrl+V to paste.[/dim]")
+
+    def copy_to_clipboard(self, text: str) -> None:
+        import subprocess
+        import platform
+        
+        try:
+            if platform.system() == "Darwin":
+                process = subprocess.Popen(["pbcopy"], stdin=subprocess.PIPE)
+                process.communicate(input=text.encode("utf-8"))
+            elif platform.system() == "Linux":
+                process = subprocess.Popen(["xclip", "-selection", "clipboard"], stdin=subprocess.PIPE)
+                process.communicate(input=text.encode("utf-8"))
+            elif platform.system() == "Windows":
+                process = subprocess.Popen(["clip"], stdin=subprocess.PIPE)
+                process.communicate(input=text.encode("utf-8"))
+        except Exception:
+            pass
 
     def on_input_submitted(self, event: Input.Submitted) -> None:
         if self._loading or not event.value.strip():
@@ -232,6 +260,7 @@ class RagmineTUI(App):
 [cyan]/sources[/cyan]            List all sources
 [cyan]/status[/cyan]             Show KB status
 [cyan]/delete <src>[/cyan]        Delete a source
+[cyan]/clear-all[/cyan]          Delete all sources/chunks
 [cyan]/export[/cyan]             Export chat to file
 [cyan]/clear[/cyan]              Clear chat
 [cyan]/help[/cyan]               Show this help
@@ -240,6 +269,7 @@ class RagmineTUI(App):
 [bold]Keyboard:[/bold]
   ↑/↓  History    Tab   Accept suggestion
   Esc  Quit       Ctrl+L  Clear screen
+  Ctrl+A  Copy all    Ctrl+K/J  Scroll
 
 [bold]Connectors:[/bold]
   web, github, confluence, slack, notion,
@@ -276,9 +306,9 @@ class RagmineTUI(App):
                     from ragmine.connectors.web import WebConnectorCLI
                     connector = WebConnectorCLI.parse_args(connector_args)
                     self._add_message("cmd", f"Fetching: {connector._urls}")
-                    chunks = connector.fetch_chunks()
+                    chunks = await asyncio.to_thread(connector.fetch_chunks)
                     source = f"web:{connector._urls[0] if connector._urls else 'url'}"
-                    count = self._ragmine.ingest_chunks(chunks, source=source)
+                    count = await asyncio.to_thread(self._ragmine.ingest_chunks, chunks, source)
                     self._add_message("bot", f"✓ Added {count} chunks from web")
                     self._update_status()
 
@@ -286,8 +316,8 @@ class RagmineTUI(App):
                     from ragmine.connectors.rss import RSSConnectorCLI
                     connector = RSSConnectorCLI.parse_args(connector_args)
                     self._add_message("cmd", f"Fetching: {connector._feeds}")
-                    chunks = connector.fetch_chunks()
-                    count = self._ragmine.ingest_chunks(chunks, source="rss:feeds")
+                    chunks = await asyncio.to_thread(connector.fetch_chunks)
+                    count = await asyncio.to_thread(self._ragmine.ingest_chunks, chunks, "rss:feeds")
                     self._add_message("bot", f"✓ Added {count} chunks from RSS")
                     self._update_status()
 
@@ -295,8 +325,8 @@ class RagmineTUI(App):
                     from ragmine.connectors.github import GitHubConnectorCLI
                     connector, source = GitHubConnectorCLI.parse_args(connector_args)
                     self._add_message("cmd", f"Fetching: {source}")
-                    chunks = connector.fetch_chunks()
-                    count = self._ragmine.ingest_chunks(chunks, source=source)
+                    chunks = await asyncio.to_thread(connector.fetch_chunks)
+                    count = await asyncio.to_thread(self._ragmine.ingest_chunks, chunks, source)
                     self._add_message("bot", f"✓ Added {count} chunks from GitHub")
                     self._update_status()
 
@@ -306,6 +336,7 @@ class RagmineTUI(App):
             except ImportError as e:
                 self._add_message("bot", f"Missing: {e}\nInstall: pip install 'ragmine[connector-{connector_name}]'")
             except Exception as e:
+                import traceback
                 error_msg = str(e)
                 if "api/embeddings" in error_msg or "404" in error_msg:
                     self._add_message("bot", f"""Error: Embeddings not working.
@@ -321,6 +352,7 @@ Ollama embeddings endpoint not available. Fix:
 Current error: {error_msg[:200]}""")
                 else:
                     self._add_message("bot", f"Error: {error_msg[:200]}")
+                    self._add_message("bot", f"[dim]{traceback.format_exc()[-1200:]}[/dim]")
 
         elif command == "/ingest":
             if not arg:
@@ -328,7 +360,7 @@ Current error: {error_msg[:200]}""")
                 return
             try:
                 self._add_message("cmd", f"Ingesting: {arg}")
-                count = self._ragmine.ingest(arg)
+                count = await asyncio.to_thread(self._ragmine.ingest, arg)
                 self._add_message("bot", f"✓ Ingested {count} chunks")
                 self._update_status()
             except Exception as e:
@@ -359,6 +391,14 @@ Current error: {error_msg[:200]}""")
             try:
                 count = self._ragmine.store.delete_by_source(arg)
                 self._add_message("bot", f"✓ Deleted {count} chunks from {arg}")
+                self._update_status()
+            except Exception as e:
+                self._add_message("bot", f"Error: {e}")
+
+        elif command == "/clear-all":
+            try:
+                sources_deleted, chunks_deleted = await asyncio.to_thread(self._ragmine.clear_all)
+                self._add_message("bot", f"✓ Cleared {chunks_deleted} chunks from {sources_deleted} sources")
                 self._update_status()
             except Exception as e:
                 self._add_message("bot", f"Error: {e}")

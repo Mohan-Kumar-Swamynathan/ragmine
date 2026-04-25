@@ -54,6 +54,7 @@ HELP_TEXT = """[dim]  Commands:
     [cyan]/query <q>[/cyan]           — ask question
     [cyan]/connect <name>[/cyan]     — connect data source
     [cyan]/delete <source>[/cyan]     — remove source
+    [cyan]/clear-all[/cyan]           — delete all sources/chunks
     [cyan]/clear[/cyan]               — clear screen
     [cyan]/help [topic][/cyan]        — show help
     [cyan]/quit[/cyan]                — exit
@@ -360,6 +361,26 @@ def _handle_cmd(rm, cmd: str, history: list):
         os.system("clear" if os.name != "nt" else "cls")
         print_banner()
 
+    elif command == "/clear-all":
+        total_chunks = rm.store.count()
+        total_sources = len(rm.store.list_sources(limit=100000))
+        if total_chunks == 0:
+            console.print("  [warning]Knowledge base is already empty.[/warning]")
+            return
+
+        if not click.confirm(
+            f"Delete ALL data? ({total_chunks} chunks across {total_sources} sources)",
+            default=False,
+        ):
+            console.print("  [muted]Cancelled.[/muted]")
+            return
+
+        sources_deleted, chunks_deleted = rm.clear_all()
+        console.print(
+            f"  [success]✓[/success] Cleared [bold]{chunks_deleted}[/bold] chunks from "
+            f"[bold]{sources_deleted}[/bold] sources"
+        )
+
     elif command == "/status":
         print_status(rm)
 
@@ -602,6 +623,33 @@ def delete(source: str):
     console.print(f"  [success]✓[/success] Deleted {count} chunks from {source}")
 
 
+@main.command(name="clear-all")
+@click.option("--yes", is_flag=True, help="Skip confirmation prompt")
+def clear_all_cmd(yes: bool):
+    """Delete all sources and chunks from the knowledge base."""
+    from ragmine.pipeline import Ragmine
+
+    rm = Ragmine()
+    total_chunks = rm.store.count()
+    total_sources = len(rm.store.list_sources(limit=100000))
+
+    if total_chunks == 0:
+        console.print("  [warning]Knowledge base is already empty.[/warning]")
+        return
+
+    if not yes and not click.confirm(
+        f"Delete ALL data? ({total_chunks} chunks across {total_sources} sources)",
+        default=False,
+    ):
+        console.print("  [muted]Cancelled.[/muted]")
+        return
+
+    sources_deleted, chunks_deleted = rm.clear_all()
+    console.print(
+        f"  [success]✓[/success] Cleared {chunks_deleted} chunks from {sources_deleted} sources"
+    )
+
+
 @main.command()
 def serve():
     """Start the REST API server."""
@@ -635,8 +683,15 @@ def tui():
     """Start the Textual TUI (terminal user interface)."""
     try:
         from ragmine.tui.app import RagmineTUI
-    except ImportError:
-        console.print("  [error]Install TUI: pip install 'ragmine[tui]'[/error]")
+    except ImportError as e:
+        console.print("  [error]TUI dependencies missing[/error]")
+        console.print()
+        console.print("  Install with one of:")
+        console.print("    [cyan]pip install 'ragmine[tui]'[/cyan]              # TUI only")
+        console.print("    [cyan]pip install 'ragmine[all]'[/cyan]                 # All features")
+        console.print("    [cyan]pip install textual lancedb pyarrow[/cyan]         # Specific packages")
+        console.print()
+        console.print(f"  [dim]Error: {e}[/dim]")
         return
 
     print_banner()

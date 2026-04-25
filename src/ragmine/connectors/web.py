@@ -130,6 +130,10 @@ class WebConnector:
         return "web"
 
     def add_url(self, url: str) -> None:
+        if not url.startswith(("http://", "https://")):
+            url = "https://" + url
+        if url.count("://") > 1:
+            raise ValueError(f"Invalid URL: {url}")
         self._urls.append(url)
 
     def fetch_pages(self) -> Iterator[WebPage]:
@@ -137,6 +141,9 @@ class WebConnector:
             yield self._fetch_page(url)
 
     def _fetch_page(self, url: str) -> WebPage:
+        if "://" in url[10:] if len(url) > 10 else "://" in url:
+            return WebPage(url=url, title="", text="[Error: Invalid URL format]")
+
         try:
             resp = self._client.get(url, headers={
                 "User-Agent": "Mozilla/5.0 (compatible; RagmineBot/1.0)"

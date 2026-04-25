@@ -6,6 +6,8 @@ Hybrid search: vector + BM25/FTS combined via Reciprocal Rank Fusion.
 
 from __future__ import annotations
 
+import re
+
 from ragmine.core.protocols import Embedder, SearchResult, VectorStore
 
 
@@ -52,7 +54,30 @@ class HybridSearcher:
         vec_results = self.store.vector_search(embedding, limit=limit)
         fts_results = self.store.fts_search(query, limit=limit)
 
+        query_tokens = _tokenize(query)
         if fts_results:
-            return rrf_fuse(vec_results, fts_results)[:limit]
+            fused = rrf_fuse(vec_results, fts_results)[:limit]
         else:
-            return vec_results[:limit]
+            fused = vec_results[:limit]
+
+        # Lightweight lexical re-rank to improve entity-centric queries
+        # like names in resumes ("Mohan", company names, etc).
+        for r in fused:
+            text = (r.chunk.text or "").lower()
+            source = (r.source or "").lower()
+            token_hits = sum(1 for t in query_tokens if t in text)
+            source_hits = sum(1 for t in query_tokens if t in source)
+            r.score += token_hits * 0.03 + source_hits * 0.07
+
+        fused.sort(key=lambda r: r.score, reverse=True)
+        return fused[:limit]
+
+
+def _tokenize(text: str) -> list[str]:
+    tokens = re.findall(r"[a-zA-Z0-9]+", text.lower())
+    # Drop tiny/common tokens to reduce noisy boosts.
+    stop = {
+        "the", "is", "are", "a", "an", "and", "or", "to", "of", "in", "on",
+        "for", "with", "what", "who", "when", "where", "how", "last",
+    }
+    return [t for t in tokens if len(t) > 2 and t not in stop]

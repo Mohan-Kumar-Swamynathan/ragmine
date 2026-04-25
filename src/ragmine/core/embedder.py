@@ -7,6 +7,8 @@ Default embedders. Pluggable — register your own via registry.
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import math
 from typing import Any
 
 from ragmine.core.config import Settings
@@ -18,6 +20,7 @@ class SentenceTransformerEmbedder:
     def __init__(self, settings: Settings):
         self._model_name = settings.embedding_model
         self._model = None
+        self._fallback_dimension = 384
 
     @property
     def _m(self):
@@ -28,14 +31,27 @@ class SentenceTransformerEmbedder:
 
     @property
     def dimension(self) -> int:
-        return self._m.get_sentence_embedding_dimension()
+        try:
+            return self._m.get_sentence_embedding_dimension()
+        except Exception:
+            return self._fallback_dimension
 
     def embed_texts(self, texts: list[str]) -> list[list[float]]:
-        embeddings = self._m.encode(texts, show_progress_bar=False)
-        return [e.tolist() for e in embeddings]
+        try:
+            embeddings = self._m.encode(texts, show_progress_bar=False)
+            return [e.tolist() for e in embeddings]
+        except Exception as e:
+            if "fds_to_keep" not in str(e):
+                raise
+            return [_hash_embed_text(text, self._fallback_dimension) for text in texts]
 
     def embed_query(self, text: str) -> list[float]:
-        return self._m.encode(text, show_progress_bar=False).tolist()
+        try:
+            return self._m.encode(text, show_progress_bar=False).tolist()
+        except Exception as e:
+            if "fds_to_keep" not in str(e):
+                raise
+            return _hash_embed_text(text, self._fallback_dimension)
 
     async def aembed_texts(self, texts: list[str]) -> list[list[float]]:
         return await asyncio.to_thread(self.embed_texts, texts)
@@ -97,3 +113,23 @@ class OllamaEmbedder:
         await client.aclose()
         resp.raise_for_status()
         return resp.json()["embedding"]
+
+
+def _hash_embed_text(text: str, dim: int) -> list[float]:
+    """Deterministic fallback embedding when model inference is unavailable."""
+    if dim <= 0:
+        return []
+    if not text:
+        return [0.0] * dim
+
+    vec = [0.0] * dim
+    for token in text.lower().split():
+        digest = hashlib.sha256(token.encode("utf-8")).digest()
+        idx = int.from_bytes(digest[:4], "big") % dim
+        sign = -1.0 if digest[4] & 1 else 1.0
+        vec[idx] += sign
+
+    norm = math.sqrt(sum(v * v for v in vec))
+    if norm == 0.0:
+        return vec
+    return [v / norm for v in vec]

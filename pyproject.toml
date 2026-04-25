@@ -1,0 +1,70 @@
+[project]
+name = "ragmine"
+version = "0.1.0"
+description = "Mine your documents. Local-first RAG with pluggable everything."
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.11"
+authors = [{ name = "Mohan" }]
+keywords = ["rag", "local", "mcp", "vector-search", "ollama", "retrieval"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+]
+
+dependencies = [
+    "click>=8.0",
+    "pydantic>=2.0",
+    "pydantic-settings>=2.0",
+    "httpx>=0.27",
+    "rich>=13.0",
+]
+
+[project.optional-dependencies]
+# Pick what you need
+embeddings = ["sentence-transformers>=3.0"]
+store-lance = ["lancedb>=0.15"]
+store-chroma = ["chromadb>=0.5"]
+parse = ["docling>=2.0"]
+rerank = ["sentence-transformers>=3.0"]
+serve = ["fastapi>=0.115", "uvicorn>=0.30"]
+mcp = ["mcp[cli]>=1.2"]
+
+# Connector dependencies
+connector-web = ["httpx>=0.27", "html2text>=2020.1.16", "trafilatura>=1.0"]
+connector-github = ["httpx>=0.27"]
+connector-confluence = ["httpx>=0.27"]
+connector-slack = ["httpx>=0.27"]
+connector-notion = ["notion-client>=2.0"]
+connector-database = ["sqlalchemy>=2.0"]
+connector-rss = ["feedparser>=6.0"]
+connector-s3 = ["boto3>=1.0"]
+
+# TUI (Textual-based interface)
+tui = ["textual>=0.50"]
+
+all = [
+    "ragmine[embeddings,store-lance,parse,rerank,serve,mcp,tui]",
+    "ragmine[connector-web,connector-github,connector-confluence,connector-slack,connector-notion,connector-database,connector-rss,connector-s3]",
+]
+
+[project.scripts]
+ragmine = "ragmine.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/ragmine"]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]

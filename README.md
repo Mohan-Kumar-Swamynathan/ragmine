@@ -106,7 +106,7 @@ what are key highlights from my resume?
 
 ---
 
-## Demo GIFs
+## Demo
 
 ![TUI Quick Tour](docs/images/tui-quick-tour.gif)
 ![PDF Ingest Demo](docs/images/pdf-ingest-demo.gif)
